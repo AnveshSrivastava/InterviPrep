@@ -1,0 +1,78 @@
+from fastapi import APIRouter, HTTPException
+from uuid import uuid4
+from schemas import StartRequest, StartResponse, AnswerRequest
+from services.openai_service import generate_questions, evaluate_answer
+from services.store import SessionStore
+
+router = APIRouter()
+store = SessionStore()
+
+@router.post("/start")
+async def start(req: StartRequest):
+    session_id = str(uuid4())
+    qs = generate_questions(req.role, req.domain, req.experience, req.mode, num=4)
+    store.create(session_id, req.dict(), qs)
+    return {"session_id": session_id, "questions": qs}
+
+@router.get("/session/{session_id}")
+async def get_session(session_id: str):
+    s = store.get(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return s
+
+@router.post("/session/{session_id}/answer")
+async def submit_answer(session_id: str, data: AnswerRequest):
+    session = store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    q_obj = next((q for q in session["questions"] if q["id"] == data.question_id), None)
+    if not q_obj:
+        raise HTTPException(status_code=400, detail="Question id not found in session")
+    eval_res = evaluate_answer(q_obj, data.answer, session["meta"]["mode"], session["meta"]["experience"])
+    store.save_answer(session_id, {
+        "question_id": data.question_id,
+        "answer": data.answer,
+        "evaluation": eval_res
+    })
+    return eval_res
+
+@router.post("/session/{session_id}/finalize")
+async def finalize(session_id: str):
+    session = store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    answers = session.get("answers", [])
+    if not answers:
+        raise HTTPException(status_code=400, detail="No answers provided")
+    total_tech = total_comm = total_conf = 0
+    resources = []
+    for a in answers:
+        ev = a["evaluation"]
+        sc = ev.get("scores", {})
+        total_tech += sc.get("technical", 0)
+        total_comm += sc.get("communication", 0)
+        total_conf += sc.get("confidence", 0)
+        resources += ev.get("resources", []) if ev.get("resources") else []
+
+    n = len(answers)
+    avg_tech = round(total_tech / n, 1)
+    avg_comm = round(total_comm / n, 1)
+    avg_conf = round(total_conf / n, 1)
+
+    mode = session["meta"].get("mode", "technical")
+    if mode == "technical":
+        overall = round((avg_tech*0.5 + avg_comm*0.25 + avg_conf*0.25), 1)
+    else:
+        overall = round((avg_comm*0.5 + avg_conf*0.3 + avg_tech*0.2), 1)
+
+    report = {
+        "overall_score": overall,
+        "avg_technical": avg_tech,
+        "avg_communication": avg_comm,
+        "avg_confidence": avg_conf,
+        "resources": list(dict.fromkeys(resources)),
+        "n_questions": n
+    }
+    store.finalize(session_id, report)
+    return report
