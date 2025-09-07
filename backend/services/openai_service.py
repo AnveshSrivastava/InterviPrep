@@ -1,20 +1,25 @@
 import os
 import json
 import re
+import google.generativeai as genai
 from dotenv import load_dotenv
-import openai
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+# Load environment variables
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+dotenv_path = os.path.join(BASE_DIR, "..", ".env")
+load_dotenv(dotenv_path=dotenv_path)
 
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+MODEL = os.getenv("DEFAULT_MODEL", "gemini-1.5-flash")
 
-if not OPENAI_KEY:
-    raise RuntimeError("OPENAI_API_KEY not found. Please set it in backend/.env or environment.")
+if not GEMINI_API_KEY:
+    raise ValueError("❌ Missing GEMINI_API_KEY in .env file")
 
-openai.api_key = OPENAI_KEY
+# Configure Gemini
+genai.configure(api_key=GEMINI_API_KEY)
 
 def safe_parse_json(text: str):
+    """Tries to safely parse text into JSON; falls back if invalid."""
     text = text.strip()
     try:
         return json.loads(text)
@@ -28,13 +33,28 @@ def safe_parse_json(text: str):
                 pass
         return {"raw": text}
 
+def _generate_response(prompt: str, max_new_tokens: int = 600, temperature: float = 0.2):
+    """Call Gemini API."""
+    model = genai.GenerativeModel(MODEL)
+    response = model.generate_content(
+        prompt,
+        generation_config={
+            "temperature": temperature,
+            "max_output_tokens": max_new_tokens
+        }
+    )
+
+    return response.text.strip() if response and response.text else ""
+
 def generate_questions(role: str, domain: str, experience: str, mode: str, num: int = 4):
+    """Generate structured interview questions."""
     role = role or "Software Engineer"
-    domain = domain or ""
+    domain_clause = f"in domain {domain}" if domain else ""
+
     prompt = f"""
 You are an experienced interviewer. Output valid JSON only.
 
-Generate {num} interview questions for a {mode} interview for a candidate applying to role "{role}" {f'in domain {domain}' if domain else ''} with experience level "{experience}".
+Generate {num} interview questions for a {mode} interview for a candidate applying to role "{role}" {domain_clause} with experience level "{experience}".
 
 Return a JSON array like:
 [
@@ -42,31 +62,27 @@ Return a JSON array like:
   ...
 ]
 """
-    resp = openai.ChatCompletion.create(
-        model=DEFAULT_MODEL,
-        messages=[{"role":"system","content":"You are an interviewer and career coach."},
-                  {"role":"user","content":prompt}],
-        temperature=0.2,
-        max_tokens=600
-    )
-    text = resp['choices'][0]['message']['content']
+    text = _generate_response(prompt, max_new_tokens=600)
     parsed = safe_parse_json(text)
+
     if isinstance(parsed, dict) and "raw" in parsed:
-        fallback = []
-        for i in range(1, num+1):
-            fallback.append({
+        return [
+            {
                 "id": i,
                 "question": f"Tell me about a challenge you faced in {role} role. (fallback Q{i})",
                 "type": mode,
                 "difficulty": "medium",
-                "hint": ""
-            })
-        return fallback
+                "hint": "",
+            }
+            for i in range(1, num + 1)
+        ]
     return parsed
 
 def evaluate_answer(question_obj: dict, answer_text: str, mode: str, experience: str):
+    """Evaluate a candidate's answer with structured scoring + feedback."""
     qid = question_obj.get("id", 0)
     question = question_obj.get("question", "")
+
     prompt = f"""
 You are an expert interviewer & coach. Evaluate the candidate's answer.
 
@@ -94,21 +110,15 @@ Return JSON only like:
  "resources": ["https://..."]
 }}
 """
-    resp = openai.ChatCompletion.create(
-        model=DEFAULT_MODEL,
-        messages=[{"role":"system","content":"You are an expert interviewer and coach."},
-                  {"role":"user","content":prompt}],
-        temperature=0.2,
-        max_tokens=700
-    )
-    text = resp['choices'][0]['message']['content']
+    text = _generate_response(prompt, max_new_tokens=700)
     parsed = safe_parse_json(text)
+
     if isinstance(parsed, dict) and "raw" in parsed:
         return {
             "question_id": qid,
             "scores": {"technical": 5, "communication": 5, "confidence": 5},
             "feedback": parsed["raw"],
             "examples_or_corrections": "",
-            "resources": []
+            "resources": [],
         }
     return parsed
