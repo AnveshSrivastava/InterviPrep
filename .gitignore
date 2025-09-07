@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+venv
+
+# Env file
+backend/.env
+backend/.env.example
+# IDEs
+.vscode/
+.idea/
+__pycache__
+.env
+backend/.env
+backend/.env.example
