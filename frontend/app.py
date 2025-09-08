@@ -9,6 +9,56 @@ API = "http://127.0.0.1:8000/interview"
 
 st.set_page_config(page_title="AI Interview Prep", layout="centered")
 
+st.markdown("""
+<style>
+/* Feedback card */
+.feedback-card {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    color: #1f2937; /* Ensure text is visible */
+}
+
+.feedback-card h5 {
+    color: #0ea5e9 !important; /* Title color */
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.feedback-card p {
+    color: #374151 !important;
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Question card */
+.question-card {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    color: #1f2937; /* Ensure text is visible */
+}
+
+.question-card h4 {
+    color: #1f2937 !important; /* Question number visible */
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.question-card p {
+    color: #374151 !important;
+    line-height: 1.5;
+    margin: 0;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 # Enhanced modern CSS styling
 st.markdown("""
 <style>
@@ -429,11 +479,12 @@ if st.session_state["session"]:
                         
                         # Enhanced feedback display
                         st.markdown(f"""
-                        <div class="feedback-card">
-                            <h5 style="color: #0ea5e9; margin-bottom: 0.5rem; font-weight: 600;">🤖 AI Feedback</h5>
-                            <p style="line-height: 1.6; margin: 0;">{feedback_data.get('feedback', 'Good answer!')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                                    <div class="feedback-card">
+                                    <h5>🤖 AI Feedback</h5>
+                                    <p>{feedback_data.get('feedback', 'Good answer!')}</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
                         
                         # Show scores if available
                         if 'scores' in feedback_data:
@@ -600,11 +651,12 @@ if st.session_state["session"]:
                     
                     # Question Card
                     st.markdown(f"""
-                    <div class="question-card">
-                        <h4 style="color: #1f2937; margin-bottom: 1rem;">Question {answer['question_id']}</h4>
-                        <p style="font-weight: 500; margin-bottom: 1rem;">{question['question']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                                <div class="question-card">
+                                    <h4>Question {q['id']}</h4>
+                                    <p>{q['question']}</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+
                     
                     # Answer
                     st.markdown(f"""
