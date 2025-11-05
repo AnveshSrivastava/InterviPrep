@@ -641,8 +641,8 @@ if st.session_state.get("session"):
 
             # Header
             # Get session data from the API response structure
-            candidate_name = session.get('name', 'Anonymous')
-            role = session.get('role', 'Unknown Role')
+            candidate_name = session.get(name, 'Anonymous')
+            role = session.get(role, 'Unknown Role')
 
             st.markdown(f"""
             <div class="section-header">🎯 Interview Summary</div>
