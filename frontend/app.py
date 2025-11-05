@@ -393,6 +393,10 @@ st.markdown('<h1 class="main-header">AI Interview Prep</h1>', unsafe_allow_html=
 # Initialize session state
 if "session" not in st.session_state:
     st.session_state["session"] = None
+if "final_report" not in st.session_state:
+    st.session_state["final_report"] = None
+if "session_completed" not in st.session_state:
+    st.session_state["session_completed"] = False
 
 # Enhanced form with better styling
 st.markdown("""
@@ -405,6 +409,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.form("start_form"):
+    # API Key section in an expander
+    with st.expander("⚙️ API Configuration (Optional)", expanded=False):
+        api_col1, api_col2 = st.columns([2, 1])
+        with api_col1:
+            api_key = st.text_input(
+            "🔑 API Key (Optional)",
+            type="password",
+            help="Enter your personal API key for this provider. If left empty, the system will use a built-in fallback key.",
+            placeholder="Enter your API key..."
+            )
+        with api_col2:
+            model_provider = st.selectbox(
+            "🤖 Model Provider",
+            ["OpenAI", "Gemini", "Groq"],
+            help="Select which AI provider to use"
+            )
+    
+    if api_key:
+        st.success("✅ Using your custom API key — make sure it’s valid and has quota.")
+    else:
+        st.info("💡 No API key entered — system will automatically use its fallback key.")
+
+        st.info("⚠️ Your API key is sensitive information. Never share it with others.")
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -430,93 +458,137 @@ if start:
         "role": role,
         "domain": domain,
         "experience": experience,
-        "mode": mode
+        "mode": mode,
+        "api_key": api_key or None,                  # optional
+        "model_provider": model_provider.lower()     # ALWAYS include
     }
-    res = requests.post(f"{API}/start", json=payload)
-    if res.status_code == 200:
-        st.session_state["session"] = res.json()
-        st.success("Session started! Scroll down for questions.")
-    else:
-        st.error("Failed to start session: " + res.text)
 
-# Display questions
-if st.session_state["session"]:
-    session = st.session_state["session"]
-    sid = session["session_id"]
-    
-    st.markdown("### 💬 Interview Questions")
-    
-    for q in session["questions"]:
-        # Enhanced question display
-        st.markdown(f"""
-        <div class="question-card">
-            <h4 style="color: #1f2937; margin-bottom: 1rem; font-size: 1.25rem;">Question {q['id']}</h4>
-            <p style="font-weight: 500; margin-bottom: 1rem; font-size: 1.1rem; line-height: 1.6;">{q['question']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        ans_key = f"ans_{q['id']}"
-        
-        # Enhanced text area
-        ans = st.text_area(
-            f"✍️ Your answer for Question {q['id']}",
-            key=ans_key,
-            value=st.session_state.get(ans_key, ""),
-            height=150,
-            placeholder="Share your thoughts, experiences, or technical knowledge..."
-        )
-        
-        cols = st.columns(3)
-        
-        # Enhanced buttons with better styling
-        if cols[0].button("📤 Submit Answer", key=f"submit_{q['id']}", use_container_width=True):
-            if ans.strip():
-                with st.spinner("🤖 AI is evaluating your answer..."):
-                    payload = {"question_id": q['id'], "answer": ans}
-                    resp = requests.post(f"{API}/session/{sid}/answer", json=payload)
-                    if resp.status_code == 200:
-                        feedback_data = resp.json()
-                        
-                        # Enhanced feedback display
-                        st.markdown(f"""
-                                    <div class="feedback-card">
-                                    <h5>🤖 AI Feedback</h5>
-                                    <p>{feedback_data.get('feedback', 'Good answer!')}</p>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+    try:
+        res = requests.post(f"{API}/start", json=payload)
 
-                        
-                        # Show scores if available
-                        if 'scores' in feedback_data:
-                            scores = feedback_data['scores']
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Technical", f"{scores.get('technical', 0)}/10")
-                            with col2:
-                                st.metric("Communication", f"{scores.get('communication', 0)}/10")
-                            with col3:
-                                st.metric("Confidence", f"{scores.get('confidence', 0)}/10")
-                        
-                        # Show improvement suggestions
-                        if feedback_data.get('examples_or_corrections'):
-                            st.markdown(f"""
-                            <div style="background: linear-gradient(135deg, #fef3c7 0%, #fef7cd 100%); padding: 1.5rem; border-radius: 12px; margin: 1rem 0; border-left: 4px solid #f59e0b; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                                <h5 style="color: #92400e; margin-bottom: 0.5rem; font-weight: 600;">💡 Suggested Improvement</h5>
-                                <p style="line-height: 1.6; margin: 0; color: #374151;">{feedback_data['examples_or_corrections']}</p>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    else:
-                        st.error("❌ Evaluation failed: " + resp.text)
+        try:
+            data = res.json()
+        except (ValueError, json.JSONDecodeError):
+            data = {"detail": res.text}
+
+        if res.status_code == 200:
+            st.session_state["session"] = data
+            st.success("✅ Session started successfully! Scroll down for your questions.")
+        else:
+            # Handle structured error response
+            detail = data.get("detail", {})
+            if isinstance(detail, dict):
+                provider = detail.get("provider", "Unknown")
+                key_used = "Your key" if detail.get("used_user_key") else "Fallback key"
+                message = detail.get("message", "Unknown error")
+                st.error(
+                    f"❌ {message}\n\n**Provider:** {provider.title()} | **Key Used:** {key_used}"
+                )
             else:
-                st.warning("⚠️ Please provide an answer before submitting.")
-        
-        # Skip button
-        if cols[1].button("⏭️ Skip", key=f"skip_{q['id']}", use_container_width=True):
-            st.warning("⏭️ Question skipped.")
-        
-        # Retry button
-        if cols[2].button("🔄 Clear", key=f"retry_{q['id']}", use_container_width=True):
-            st.info("🔄 Answer cleared. You can now provide a new answer.")
+                st.error(f"❌ {detail}")
+
+    except requests.exceptions.ConnectionError:
+        st.error("🚫 Could not connect to backend API.")
+    except Exception as e:
+        st.error(f"❌ Unexpected error: {str(e)}")
+
+# Display questions (only if session exists)
+# === DISPLAY QUESTIONS ===
+if st.session_state.get("session"):
+    session = st.session_state["session"]
+    sid = session.get("session_id")
+
+    # 🧠 Display provider + key info
+    meta = session.get("meta", {})
+    if meta:
+        provider = meta.get("provider", "Unknown").title()
+        used_user_key = meta.get("used_user_key", False)
+        masked_key = meta.get("masked_api_key", None)
+        key_source = "Your key" if used_user_key else "Fallback key"
+        st.info(
+            f"🧠 **Provider:** {provider} | **Key Source:** {key_source}"
+            + (f" ({masked_key})" if masked_key else "")
+        )
+
+    st.markdown("### 💬 Interview Questions")
+
+    questions = session.get("questions", [])
+    if not isinstance(questions, list) or not questions:
+        st.error(f"⚠️ Unexpected or empty question response from backend: {questions}")
+    else:
+        for q in questions:
+            st.markdown(f"""
+            <div class="question-card">
+                <h4 style="color: #1f2937; margin-bottom: 1rem; font-size: 1.25rem;">Question {q['id']}</h4>
+                <p style="font-weight: 500; margin-bottom: 1rem; font-size: 1.1rem; line-height: 1.6;">{q['question']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            ans_key = f"ans_{q['id']}"
+            ans = st.text_area(
+                f"✍️ Your answer for Question {q['id']}",
+                key=ans_key,
+                value=st.session_state.get(ans_key, ""),
+                height=150,
+                placeholder="Share your thoughts, experiences, or technical knowledge..."
+            )
+
+            cols = st.columns(3)
+            if cols[0].button("📤 Submit Answer", key=f"submit_{q['id']}", use_container_width=True):
+                if ans.strip():
+                    with st.spinner("🤖 AI is evaluating your answer..."):
+                        payload = {"question_id": q['id'], "answer": ans}
+                        try:
+                            resp = requests.post(f"{API}/session/{sid}/answer", json=payload)
+                            try:
+                                feedback_data = resp.json()
+                            except (ValueError, json.JSONDecodeError):
+                                feedback_data = {}
+
+                            if resp.status_code == 200:
+                                st.markdown(f"""
+                                    <div class="feedback-card">
+                                        <h5>🤖 AI Feedback</h5>
+                                        <p>{feedback_data.get('feedback', 'Good answer!')}</p>
+                                    </div>
+                                """, unsafe_allow_html=True)
+
+                                scores = feedback_data.get('scores', {}) if isinstance(feedback_data, dict) else {}
+                                if isinstance(scores, dict) and scores:
+                                    col1_s, col2_s, col3_s = st.columns(3)
+                                    with col1_s:
+                                        st.metric("Technical", f"{scores.get('technical', 0)}/10")
+                                    with col2_s:
+                                        st.metric("Communication", f"{scores.get('communication', 0)}/10")
+                                    with col3_s:
+                                        st.metric("Confidence", f"{scores.get('confidence', 0)}/10")
+
+                                if isinstance(feedback_data, dict) and feedback_data.get('examples_or_corrections'):
+                                    st.markdown(f"""
+                                    <div style=\"background: linear-gradient(135deg, #fef3c7 0%, #fef7cd 100%); padding: 1.5rem; border-radius: 12px; margin: 1rem 0; border-left: 4px solid #f59e0b; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);\">\n                                        <h5 style=\"color: #92400e; margin-bottom: 0.5rem; font-weight: 600;\">💡 Suggested Improvement</h5>\n                                        <p style=\"line-height: 1.6; margin: 0; color: #374151;\">{feedback_data['examples_or_corrections']}</p>\n                                    </div>
+                                    """, unsafe_allow_html=True)
+                            else:
+                                try:
+                                    err = feedback_data.get("detail", "") if isinstance(feedback_data, dict) else ""
+                                    if isinstance(err, dict):
+                                        msg = err.get("message", "Evaluation failed.")
+                                        prov = err.get("provider", "unknown").title()
+                                        used = "Your key" if err.get("used_user_key") else "Fallback key"
+                                        st.error(f"❌ {msg}\n\n**Provider:** {prov} | **Key Used:** {used}")
+                                    else:
+                                        st.error(f"❌ {err or resp.text}")
+                                except Exception:
+                                    st.error("❌ Evaluation failed unexpectedly.")
+                        except requests.exceptions.ConnectionError:
+                            st.error("🚫 Could not connect to backend API.")
+                        except Exception as e:
+                            st.error(f"❌ Unexpected error: {str(e)}")
+                else:
+                    st.warning("⚠️ Please provide an answer before submitting.")
+            if cols[1].button("⏭️ Skip", key=f"skip_{q['id']}", use_container_width=True):
+                st.warning("⏭️ Question skipped.")
+            if cols[2].button("🔄 Clear", key=f"retry_{q['id']}", use_container_width=True):
+                st.info("🔄 Answer cleared. You can now provide a new answer.")
 
     # Enhanced finish & report section
     st.markdown("---")
@@ -524,48 +596,65 @@ if st.session_state["session"]:
     with col2:
         if st.button("📊 Generate Final Report", use_container_width=True, type="primary"):
             with st.spinner("🤖 Generating your comprehensive interview report..."):
-                r = requests.post(f"{API}/session/{sid}/finalize")
-                if r.status_code == 200:
-                    report_data = r.json()
-                    
-                    # Store report data in session state for export
-                    st.session_state["final_report"] = report_data
-                    st.session_state["session_completed"] = True
-                    
-                    st.success("✅ Final report generated! Scroll down to view your results.")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to generate report: " + r.text)
-    
+                try:
+                    r = requests.post(f"{API}/session/{sid}/finalize")
+                    try:
+                        report_data = r.json()
+                    except (ValueError, json.JSONDecodeError):
+                        report_data = None
+
+                    if r.status_code == 200 and isinstance(report_data, dict):
+                        # Store report data in session state for export
+                        st.session_state["final_report"] = report_data
+                        st.session_state["session_completed"] = True
+                        st.success("✅ Final report generated! Scroll down to view your results.")
+                        st.rerun()
+                    else:
+                        if isinstance(report_data, dict):
+                            detail = report_data.get("detail", {})
+                            if isinstance(detail, dict):
+                                msg = detail.get("message", "Failed to generate report.")
+                                prov = detail.get("provider", "unknown").title()
+                                used = "Your key" if detail.get("used_user_key") else "Fallback key"
+                                st.error(f"❌ {msg}\n\n**Provider:** {prov} | **Key Used:** {used}")
+                            else:
+                                st.error(f"❌ {detail or r.text}")
+                        else:
+                            st.error("❌ Failed to generate report: " + (r.text or "Unknown error"))
+                except requests.exceptions.ConnectionError:
+                    st.error("🚫 Could not connect to backend API.")
+                except Exception as e:
+                    st.error(f"❌ Unexpected error: {str(e)}")
+
     # Beautiful Report Display (only show if session is completed)
     if st.session_state.get("session_completed", False):
         report_data = st.session_state.get("final_report", {})
-        
+
         st.markdown("---")
         st.markdown("### 📊 Your Interview Report")
-        
+
         # Report Tabs
         tab1, tab2, tab3 = st.tabs(["📈 Summary", "📋 Detailed Report", "🎯 Actions"])
-        
+
         with tab1:
             st.markdown('<div class="report-card">', unsafe_allow_html=True)
-            
+
             # Header
             # Get session data from the API response structure
             candidate_name = session.get('name', 'Anonymous')
             role = session.get('role', 'Unknown Role')
-            
+
             st.markdown(f"""
             <div class="section-header">🎯 Interview Summary</div>
             <p style="color: #6b7280; margin-bottom: 2rem; font-size: 1.1rem;">
                 <strong>{candidate_name}</strong> • {role} • {datetime.now().strftime('%B %d, %Y')}
             </p>
             """, unsafe_allow_html=True)
-            
+
             # Overall Score
             overall_score = report_data.get('overall_score', 0)
             score_class = "score-excellent" if overall_score >= 8 else "score-good" if overall_score >= 6 else "score-average" if overall_score >= 4 else "score-poor"
-            
+
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
                 st.markdown(f"""
@@ -574,12 +663,12 @@ if st.session_state["session"]:
                     <div class="metric-label">Overall Score</div>
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             # Detailed Scores
             st.markdown('<div class="section-header">📊 Performance Breakdown</div>', unsafe_allow_html=True)
-            
+
             col1, col2, col3 = st.columns(3)
-            
+
             with col1:
                 tech_score = report_data.get('avg_technical', 0)
                 st.markdown(f"""
@@ -588,7 +677,7 @@ if st.session_state["session"]:
                     <div class="metric-label">Technical</div>
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             with col2:
                 comm_score = report_data.get('avg_communication', 0)
                 st.markdown(f"""
@@ -597,7 +686,7 @@ if st.session_state["session"]:
                     <div class="metric-label">Communication</div>
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             with col3:
                 conf_score = report_data.get('avg_confidence', 0)
                 st.markdown(f"""
@@ -606,10 +695,10 @@ if st.session_state["session"]:
                     <div class="metric-label">Confidence</div>
                 </div>
                 """, unsafe_allow_html=True)
-            
+
             # Session Details
             st.markdown('<div class="section-header">📋 Session Details</div>', unsafe_allow_html=True)
-            
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Questions Answered", report_data.get('n_questions', 0))
@@ -617,19 +706,19 @@ if st.session_state["session"]:
                 st.metric("Interview Mode", session.get('mode', 'technical').title())
             with col3:
                 st.metric("Target Role", role)
-            
+
             # Resources
             resources = report_data.get('resources', [])
             if resources:
                 st.markdown('<div class="section-header">📚 Recommended Resources</div>', unsafe_allow_html=True)
                 for i, resource in enumerate(resources, 1):
                     st.markdown(f"**{i}.** {resource}")
-            
+
             st.markdown('</div>', unsafe_allow_html=True)
-        
+
         with tab2:
             st.markdown('<div class="report-card">', unsafe_allow_html=True)
-            
+
             # Header
             st.markdown(f"""
             <div class="section-header">📋 Complete Interview Report</div>
@@ -637,27 +726,26 @@ if st.session_state["session"]:
                 <strong>{candidate_name}</strong> • {role} • {session.get('mode', 'technical').title()}
             </p>
             """, unsafe_allow_html=True)
-            
+
             # Questions and Answers
             answers = session.get("answers", [])
             questions = session.get("questions", [])
-            
+
             for answer in answers:
                 question = next((q for q in questions if q["id"] == answer["question_id"]), None)
-                
+
                 if question:
                     eval_data = answer.get("evaluation", {})
                     scores = eval_data.get("scores", {})
-                    
+
                     # Question Card
                     st.markdown(f"""
                                 <div class="question-card">
-                                    <h4>Question {q['id']}</h4>
-                                    <p>{q['question']}</p>
+                                    <h4>Question {question['id']}</h4>
+                                    <p>{question['question']}</p>
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                    
                     # Answer
                     st.markdown(f"""
                     <div style="background: #f9fafb; padding: 1rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #2563eb;">
@@ -665,7 +753,7 @@ if st.session_state["session"]:
                         <span style="color: #374151;">{answer['answer']}</span>
                     </div>
                     """, unsafe_allow_html=True)
-                    
+
                     # Scores
                     if scores:
                         col1, col2, col3 = st.columns(3)
@@ -675,7 +763,7 @@ if st.session_state["session"]:
                             st.metric("Communication", f"{scores.get('communication', 0)}/10")
                         with col3:
                             st.metric("Confidence", f"{scores.get('confidence', 0)}/10")
-                    
+
                     # Feedback
                     if eval_data.get('feedback'):
                         st.markdown(f"""
@@ -684,7 +772,7 @@ if st.session_state["session"]:
                             <p>{eval_data['feedback']}</p>
                         </div>
                         """, unsafe_allow_html=True)
-                    
+
                     # Improvement suggestions
                     if eval_data.get('examples_or_corrections'):
                         st.markdown(f"""
@@ -693,21 +781,21 @@ if st.session_state["session"]:
                             <p>{eval_data['examples_or_corrections']}</p>
                         </div>
                         """, unsafe_allow_html=True)
-                    
+
                     st.markdown("<hr style='margin: 2rem 0; border: none; border-top: 2px solid #e9ecef;'>", unsafe_allow_html=True)
-            
+
             st.markdown('</div>', unsafe_allow_html=True)
-        
+
         with tab3:
             st.markdown('<div class="report-card">', unsafe_allow_html=True)
-            
+
             st.markdown("""
             <div class="section-header">🎯 What's Next?</div>
             <p style="color: #6b7280; margin-bottom: 2rem; font-size: 1.1rem;">Choose your next action to continue your interview preparation journey</p>
             """, unsafe_allow_html=True)
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown("### 📄 Export Your Report")
                 if st.button("📥 Download Full Report PDF", help="Download complete report as PDF", use_container_width=True):
@@ -717,7 +805,7 @@ if st.session_state["session"]:
                             if response.status_code == 200:
                                 pdf_data = response.content
                                 filename = f"interview_report_{candidate_name}_{sid[:8]}.pdf"
-                                
+
                                 st.download_button(
                                     label="📥 Download PDF Report",
                                     data=pdf_data,
@@ -728,9 +816,11 @@ if st.session_state["session"]:
                                 st.success("✅ PDF ready for download!")
                             else:
                                 st.error("❌ Failed to generate PDF: " + response.text)
+                        except requests.exceptions.ConnectionError:
+                            st.error("🚫 Could not connect to backend API.")
                         except Exception as e:
                             st.error(f"❌ Export failed: {str(e)}")
-            
+
             with col2:
                 st.markdown("### 🔄 Continue Learning")
                 if st.button("🚀 Start New Interview", help="Start a fresh interview session", use_container_width=True, type="primary"):
@@ -739,7 +829,7 @@ if st.session_state["session"]:
                     st.session_state["final_report"] = None
                     st.session_state["session_completed"] = False
                     st.rerun()
-            
+
             st.markdown("""
             <div style="margin-top: 2rem; padding: 2rem; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-radius: 16px; border-left: 6px solid #0ea5e9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
                 <h4 style="color: #0c4a6e; margin-bottom: 1.5rem; font-size: 1.25rem;">💡 Tips for Continuous Improvement</h4>
@@ -771,5 +861,7 @@ if st.session_state["session"]:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
+
             st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("👋 Start a new session above to get your AI-generated interview questions.")

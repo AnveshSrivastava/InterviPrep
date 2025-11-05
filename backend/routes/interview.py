@@ -14,9 +14,37 @@ pdf_service = PDFService()
 @router.post("/start")
 async def start(req: StartRequest):
     session_id = str(uuid4())
-    qs = generate_questions(req.role, req.domain, req.experience, req.mode, num=4)
-    store.create(session_id, req.dict(), qs)
+
+    # prefer model_provider, fallback to provider (if used elsewhere)
+    provider = (req.model_provider or getattr(req, "provider", None) or "gemini").lower()
+    api_key = req.api_key or None
+
+    qs = generate_questions(
+        req.role, req.domain, req.experience, req.mode, num=4,
+        api_key=api_key, provider=provider
+    )
+
+    # If service returned an error dict, relay that with 400
+    if isinstance(qs, dict) and qs.get("error"):
+        raise HTTPException(status_code=400, detail=qs["error"])
+
+    # store meta so evaluation uses same provider/key
+    meta = req.dict()
+    meta["provider"] = provider
+
+    # Secure handling: don't store raw key, store masked + flag
+    if api_key:
+        masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "****"
+        meta["used_user_key"] = True
+        meta["masked_api_key"] = masked_key
+    else:
+        meta["used_user_key"] = False
+        meta["masked_api_key"] = None
+
+    
+    store.create(session_id, meta, qs)
     return {"session_id": session_id, "questions": qs}
+
 
 @router.get("/session/{session_id}")
 async def get_session(session_id: str):
@@ -30,10 +58,46 @@ async def submit_answer(session_id: str, data: AnswerRequest):
     session = store.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
     q_obj = next((q for q in session["questions"] if q["id"] == data.question_id), None)
     if not q_obj:
         raise HTTPException(status_code=400, detail="Question id not found in session")
-    eval_res = evaluate_answer(q_obj, data.answer, session["meta"]["mode"], session["meta"]["experience"])
+
+    provider = session["meta"].get("provider", "gemini")
+    api_key = session["meta"].get("api_key")  # ✅ Allow user key, fallback handled in backend
+
+    eval_res = evaluate_answer(
+        q_obj, data.answer,
+        session["meta"]["mode"], session["meta"]["experience"],
+        api_key=api_key, provider=provider
+    )
+
+    # ✅ Fix: use correct variable name and structured error
+    if isinstance(eval_res, dict) and eval_res.get("error"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": eval_res["error"],
+                "provider": provider,
+                "used_user_key": bool(api_key)
+            }
+        )
+
+    # ✅ Optional: validation guard
+    if not isinstance(eval_res, dict):
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "Unexpected evaluation result format", "provider": provider},
+        )
+
+    store.save_answer(session_id, {
+        "question_id": data.question_id,
+        "answer": data.answer,
+        "evaluation": eval_res
+    })
+    return eval_res
+
+
     store.save_answer(session_id, {
         "question_id": data.question_id,
         "answer": data.answer,

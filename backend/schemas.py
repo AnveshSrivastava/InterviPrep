@@ -2,12 +2,13 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 
 class StartRequest(BaseModel):
-    name: str
     role: str
-    domain: Optional[str] = None
+    domain: str
     experience: str
-    mode: str  # "technical" or "behavioral"
-
+    mode: str
+    model_provider: Optional[str] = None
+    api_key: Optional[str] = None
+    # provider field optional — not needed if you use model_provider
 class Question(BaseModel):
     id: int
     question: str
