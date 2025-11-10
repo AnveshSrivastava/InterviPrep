@@ -5,9 +5,24 @@ import io
 import json
 from datetime import datetime
 
-API = "http://127.0.0.1:8000/interview"
+# API endpoints
+LOCAL_API = "http://127.0.0.1:8000/interview"
+PROD_API = "https://interviprep-1-y9aq.onrender.com/interview"
+
+# Set the active API endpoint
+API = PROD_API  # Change to LOCAL_API for local development
 
 st.set_page_config(page_title="AI Interview Prep", layout="centered")
+
+# Add connection status check
+try:
+    response = requests.get(f"{API}/health", timeout=5)
+    if response.status_code == 200:
+        st.success("✅ Connected to Interview Bot Server")
+    else:
+        st.warning("⚠️ Interview Bot Server is responding but may have issues")
+except requests.RequestException:
+    st.error("❌ Could not connect to Interview Bot Server. Some features may be unavailable.")
 
 st.markdown("""
 <style>
